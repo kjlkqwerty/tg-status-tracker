@@ -38,19 +38,14 @@ from telethon.tl.types import (
 # КОНФІГУРАЦІЯ — читається зі змінних середовища (або fallback на значення)
 # ─────────────────────────────────────────────────────────────────────────────
 import os as _os
-import base64 as _base64
 
 API_ID: int   = int(_os.environ.get("API_ID", "36703360"))
 API_HASH: str = _os.environ.get("API_HASH", "84595afef048f7f717fddc5c2d2fbb99")
 BOT_TOKEN: str = _os.environ.get("BOT_TOKEN", "9278687261:AAGxm039dcpa3xL2F9cBs3t9orw_muQzf5s")
 TARGET_USER: str | int = _os.environ.get("TARGET_USER", "yana_aaay")
 SESSION_NAME: str = "tracker_session"
-
-# На Railway сесія зберігається як base64 у змінній SESSION_DATA
-_SESSION_DATA = _os.environ.get("SESSION_DATA", "")
-if _SESSION_DATA and not _os.path.exists(SESSION_NAME + ".session"):
-    with open(SESSION_NAME + ".session", "wb") as _f:
-        _f.write(_base64.b64decode(_SESSION_DATA))
+# StringSession — компактний рядок сесії для хмарного деплою
+SESSION_STRING: str = _os.environ.get("SESSION_STRING", "")
 
 CHECK_INTERVAL_BASE: int = 37
 MAX_HISTORY: int = 100
@@ -388,7 +383,11 @@ async def main():
     dp = Dispatcher()
     dp.include_router(router)
 
-    async with TelegramClient(SESSION_NAME, API_ID, API_HASH) as tg_client:
+    # Якщо є SESSION_STRING — використовуємо StringSession (для хмарного деплою)
+    from telethon.sessions import StringSession
+    session = StringSession(SESSION_STRING) if SESSION_STRING else SESSION_NAME
+
+    async with TelegramClient(session, API_ID, API_HASH) as tg_client:
         await tg_client.start()
         me = await tg_client.get_me()
         log.info("Telethon connected as: %s", me.first_name)
