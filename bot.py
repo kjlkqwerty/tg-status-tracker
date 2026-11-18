@@ -14,6 +14,12 @@ import sys
 from collections import deque
 from datetime import datetime, timezone, timedelta
 
+try:
+    from zoneinfo import ZoneInfo
+    KYIV_TZ = ZoneInfo("Europe/Kyiv")
+except Exception:
+    KYIV_TZ = timezone(timedelta(hours=2))
+
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
@@ -55,6 +61,10 @@ LOG_FILE: str | None = None   # На Railway логи йдуть у stdout
 
 # ── Логування ─────────────────────────────────────────────────────────────────
 def setup_logging() -> logging.Logger:
+    def kyiv_time_converter(*args):
+        return datetime.now(KYIV_TZ).timetuple()
+
+    logging.Formatter.converter = kyiv_time_converter
     fmt = "%(asctime)s [%(levelname)s] %(message)s"
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
     if LOG_FILE:
@@ -76,7 +86,7 @@ class State:
     last_seen_at: datetime | None = None         # коли виходив
     online_count_today: int = 0
     online_seconds_today: int = 0
-    day_reset: datetime = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    day_reset: datetime = datetime.now(KYIV_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
     target_name: str = TARGET_USER if isinstance(TARGET_USER, str) else str(TARGET_USER)
 
 state = State()
@@ -84,12 +94,14 @@ state = State()
 
 # ── Утиліти ───────────────────────────────────────────────────────────────────
 def now_local() -> datetime:
-    return datetime.now(timezone.utc).astimezone()
+    return datetime.now(KYIV_TZ)
 
 def fmt_dt(dt: datetime) -> str:
     if dt is None:
         return "невідомо"
-    return dt.astimezone().strftime("%d.%m.%Y %H:%M:%S")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(KYIV_TZ).strftime("%d.%m.%Y %H:%M:%S")
 
 def fmt_duration(seconds: int) -> str:
     if seconds < 60:
@@ -120,8 +132,8 @@ def status_label(status) -> tuple[str, str]:
     return "❓", f"невідомий статус"
 
 def reset_daily_stats_if_needed():
-    """Скидає щоденну статистику о 00:00."""
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    """Скидає щоденну статистику о 00:00 за київським часом."""
+    today_start = datetime.now(KYIV_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
     if today_start > state.day_reset:
         state.online_count_today = 0
         state.online_seconds_today = 0
@@ -186,7 +198,7 @@ def build_history_message() -> str:
 def build_stats_message() -> str:
     reset_daily_stats_if_needed()
     target = f"@{state.target_name}" if not str(state.target_name).lstrip("-").isdigit() else f"ID {state.target_name}"
-    uptime_delta = datetime.now(timezone.utc) - state.day_reset
+    uptime_delta = datetime.now(KYIV_TZ) - state.day_reset
     total_events = len(state.history)
 
     return (
@@ -197,7 +209,7 @@ def build_stats_message() -> str:
         f"  • Час онлайн: *{fmt_duration(state.online_seconds_today)}*\n\n"
         f"📦 *Всього в пам'яті:*\n"
         f"  • Подій записано: *{total_events}*\n"
-        f"  • Трекер активний: *{fmt_duration(int((datetime.now(timezone.utc) - state.day_reset).total_seconds()))}*\n\n"
+        f"  • Трекер активний: *{fmt_duration(int((datetime.now(KYIV_TZ) - state.day_reset).total_seconds()))}*\n\n"
         f"⚙️ Інтервал перевірки: *~{CHECK_INTERVAL_BASE} сек*"
     )
 
