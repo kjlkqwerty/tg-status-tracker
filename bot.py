@@ -8,6 +8,7 @@ Python: 3.8+  |  Telethon + aiogram 3.x
 """
 
 import asyncio
+import html
 import logging
 import random
 import sys
@@ -29,6 +30,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     Message,
 )
+from aiogram.exceptions import TelegramBadRequest
 from telethon import TelegramClient
 from telethon.errors import FloodWaitError, UserPrivacyRestrictedError
 from telethon.tl.types import (
@@ -159,9 +161,15 @@ def back_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-# ── Формування повідомлень ────────────────────────────────────────────────────
+# ── Формування повідомлень (HTML) ─────────────────────────────────────────────
+def get_safe_target() -> str:
+    target_str = str(state.target_name)
+    if not target_str.lstrip("-").isdigit():
+        return html.escape(f"@{target_str}")
+    return html.escape(f"ID {target_str}")
+
 def build_status_message() -> str:
-    target = f"@{state.target_name}" if not str(state.target_name).lstrip("-").isdigit() else f"ID {state.target_name}"
+    target = get_safe_target()
     now = fmt_dt(now_local())
 
     if state.is_online is None:
@@ -170,14 +178,14 @@ def build_status_message() -> str:
         since = ""
         if state.last_online_at:
             delta = int((datetime.now(timezone.utc) - state.last_online_at).total_seconds())
-            since = f"\n⏱ В мережі вже: *{fmt_duration(delta)}*"
-        status_line = f"🟢 *ОНЛАЙН*{since}"
+            since = f"\n⏱ В мережі вже: <b>{fmt_duration(delta)}</b>"
+        status_line = f"🟢 <b>ОНЛАЙН</b>{since}"
     else:
-        last = f"\n👁 Остання активність: *{fmt_dt(state.last_seen_at)}*" if state.last_seen_at else ""
-        status_line = f"⚫ *ОФЛАЙН*{last}"
+        last = f"\n👁 Остання активність: <b>{fmt_dt(state.last_seen_at)}</b>" if state.last_seen_at else ""
+        status_line = f"⚫ <b>ОФЛАЙН</b>{last}"
 
     return (
-        f"👤 Ціль: *{target}*\n"
+        f"👤 Ціль: <b>{target}</b>\n"
         f"{'─' * 28}\n"
         f"{status_line}\n\n"
         f"🕐 Оновлено: {now}"
@@ -186,31 +194,31 @@ def build_status_message() -> str:
 def build_history_message() -> str:
     if not state.history:
         return "📋 Історія порожня — чекаємо перших подій..."
-    lines = [f"📋 *Останні {len(state.history)} подій:*\n{'─' * 28}"]
+    lines = [f"📋 <b>Останні {len(state.history)} подій:</b>\n{'─' * 28}"]
     for i, event in enumerate(reversed(state.history), 1):
         emoji = "🟢" if event["online"] else "⚫"
-        lines.append(f"{emoji} {event['time']}  —  {event['label']}")
+        label = html.escape(event['label'])
+        lines.append(f"{emoji} {event['time']}  —  {label}")
         if i >= 20:  # показуємо максимум 20 останніх
-            lines.append(f"_...і ще {len(state.history) - 20} подій_")
+            lines.append(f"<i>...і ще {len(state.history) - 20} подій</i>")
             break
     return "\n".join(lines)
 
 def build_stats_message() -> str:
     reset_daily_stats_if_needed()
-    target = f"@{state.target_name}" if not str(state.target_name).lstrip("-").isdigit() else f"ID {state.target_name}"
-    uptime_delta = datetime.now(KYIV_TZ) - state.day_reset
+    target = get_safe_target()
     total_events = len(state.history)
 
     return (
-        f"📊 *Статистика моніторингу*\n{'─' * 28}\n"
-        f"👤 Ціль: *{target}*\n\n"
-        f"📅 *Сьогодні:*\n"
-        f"  • Заходів онлайн: *{state.online_count_today}*\n"
-        f"  • Час онлайн: *{fmt_duration(state.online_seconds_today)}*\n\n"
-        f"📦 *Всього в пам'яті:*\n"
-        f"  • Подій записано: *{total_events}*\n"
-        f"  • Трекер активний: *{fmt_duration(int((datetime.now(KYIV_TZ) - state.day_reset).total_seconds()))}*\n\n"
-        f"⚙️ Інтервал перевірки: *~{CHECK_INTERVAL_BASE} сек*"
+        f"📊 <b>Статистика моніторингу</b>\n{'─' * 28}\n"
+        f"👤 Ціль: <b>{target}</b>\n\n"
+        f"📅 <b>Сьогодні:</b>\n"
+        f"  • Заходів онлайн: <b>{state.online_count_today}</b>\n"
+        f"  • Час онлайн: <b>{fmt_duration(state.online_seconds_today)}</b>\n\n"
+        f"📦 <b>Всього в пам'яті:</b>\n"
+        f"  • Подій записано: <b>{total_events}</b>\n"
+        f"  • Трекер активний: <b>{fmt_duration(int((datetime.now(KYIV_TZ) - state.day_reset).total_seconds()))}</b>\n\n"
+        f"⚙️ Інтервал перевірки: <b>~{CHECK_INTERVAL_BASE} сек</b>"
     )
 
 
@@ -220,11 +228,12 @@ router = Router()
 @router.message(Command("start"))
 async def cmd_start(msg: Message):
     state.owner_chat_id = msg.chat.id
-    target = f"@{state.target_name}" if not str(state.target_name).lstrip("-").isdigit() else f"ID {state.target_name}"
+    target = get_safe_target()
+    first_name = html.escape(msg.from_user.first_name if msg.from_user else "користувач")
     await msg.answer(
-        f"👋 *Привіт, {msg.from_user.first_name}!*\n\n"
+        f"👋 <b>Привіт, {first_name}!</b>\n\n"
         f"🔍 Трекер статусу Telegram запущено.\n"
-        f"👤 Відстежую: *{target}*\n\n"
+        f"👤 Відстежую: <b>{target}</b>\n\n"
         f"Я надсилатиму сповіщення коли ціль:\n"
         f"🟢 заходить онлайн\n"
         f"⚫ виходить офлайн\n\n"
@@ -232,46 +241,58 @@ async def cmd_start(msg: Message):
         f"/status — поточний статус\n"
         f"/history — історія подій\n"
         f"/stats — статистика",
-        parse_mode=ParseMode.MARKDOWN,
+        parse_mode=ParseMode.HTML,
         reply_markup=main_keyboard(),
     )
     log.info("Owner registered: chat_id=%d", msg.chat.id)
 
 @router.message(Command("status"))
 async def cmd_status(msg: Message):
-    await msg.answer(build_status_message(), parse_mode=ParseMode.MARKDOWN, reply_markup=main_keyboard())
+    await msg.answer(build_status_message(), parse_mode=ParseMode.HTML, reply_markup=main_keyboard())
 
 @router.message(Command("history"))
 async def cmd_history(msg: Message):
-    await msg.answer(build_history_message(), parse_mode=ParseMode.MARKDOWN, reply_markup=back_keyboard())
+    await msg.answer(build_history_message(), parse_mode=ParseMode.HTML, reply_markup=back_keyboard())
 
 @router.message(Command("stats"))
 async def cmd_stats(msg: Message):
-    await msg.answer(build_stats_message(), parse_mode=ParseMode.MARKDOWN, reply_markup=back_keyboard())
+    await msg.answer(build_stats_message(), parse_mode=ParseMode.HTML, reply_markup=back_keyboard())
 
 @router.callback_query(F.data == "status")
 async def cb_status(cb: CallbackQuery):
-    await cb.message.edit_text(build_status_message(), parse_mode=ParseMode.MARKDOWN, reply_markup=main_keyboard())
+    try:
+        await cb.message.edit_text(build_status_message(), parse_mode=ParseMode.HTML, reply_markup=main_keyboard())
+    except TelegramBadRequest:
+        pass
     await cb.answer()
 
 @router.callback_query(F.data == "history")
 async def cb_history(cb: CallbackQuery):
-    await cb.message.edit_text(build_history_message(), parse_mode=ParseMode.MARKDOWN, reply_markup=back_keyboard())
+    try:
+        await cb.message.edit_text(build_history_message(), parse_mode=ParseMode.HTML, reply_markup=back_keyboard())
+    except TelegramBadRequest:
+        pass
     await cb.answer()
 
 @router.callback_query(F.data == "stats")
 async def cb_stats(cb: CallbackQuery):
-    await cb.message.edit_text(build_stats_message(), parse_mode=ParseMode.MARKDOWN, reply_markup=back_keyboard())
+    try:
+        await cb.message.edit_text(build_stats_message(), parse_mode=ParseMode.HTML, reply_markup=back_keyboard())
+    except TelegramBadRequest:
+        pass
     await cb.answer()
 
 @router.callback_query(F.data == "menu")
 async def cb_menu(cb: CallbackQuery):
-    target = f"@{state.target_name}" if not str(state.target_name).lstrip("-").isdigit() else f"ID {state.target_name}"
-    await cb.message.edit_text(
-        f"🏠 *Головне меню*\n👤 Відстежую: *{target}*",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=main_keyboard(),
-    )
+    target = get_safe_target()
+    try:
+        await cb.message.edit_text(
+            f"🏠 <b>Головне меню</b>\n👤 Відстежую: <b>{target}</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=main_keyboard(),
+        )
+    except TelegramBadRequest:
+        pass
     await cb.answer()
 
 
@@ -281,7 +302,7 @@ async def notify(bot: Bot, text: str):
         log.warning("owner_chat_id не встановлено — надішліть /start боту!")
         return
     try:
-        await bot.send_message(state.owner_chat_id, text, parse_mode=ParseMode.MARKDOWN, reply_markup=main_keyboard())
+        await bot.send_message(state.owner_chat_id, text, parse_mode=ParseMode.HTML, reply_markup=main_keyboard())
     except Exception as e:
         log.warning("Не вдалось надіслати сповіщення: %s", e)
 
@@ -329,11 +350,11 @@ async def run_tracker(tg_client: TelegramClient, bot: Bot):
                 state.history.append({"online": True, "label": "зайшов(-ла) онлайн", "time": event_time})
 
                 log.info("▶ CAME ONLINE")
-                target_display = f"@{state.target_name}" if not str(state.target_name).lstrip('-').isdigit() else state.target_name
+                target_display = get_safe_target()
                 await notify(bot,
-                    f"🟢 *{target_display} — ОНЛАЙН*\n"
+                    f"🟢 <b>{target_display} — ОНЛАЙН</b>\n"
                     f"🕐 {now_local().strftime('%d.%m.%Y %H:%M:%S')}\n"
-                    f"📅 Заходів сьогодні: *{state.online_count_today}*"
+                    f"📅 Заходів сьогодні: <b>{state.online_count_today}</b>"
                 )
 
             # Вийшов ОФЛАЙН
@@ -357,12 +378,12 @@ async def run_tracker(tg_client: TelegramClient, bot: Bot):
                 state.history.append({"online": False, "label": f"офлайн (сесія: {fmt_duration(duration)})", "time": event_time})
 
                 log.info("◀ WENT OFFLINE — session: %s", fmt_duration(duration))
-                target_display = f"@{state.target_name}" if not str(state.target_name).lstrip('-').isdigit() else state.target_name
+                target_display = get_safe_target()
                 await notify(bot,
-                    f"⚫ *{target_display} — ОФЛАЙН*\n"
+                    f"⚫ <b>{target_display} — ОФЛАЙН</b>\n"
                     f"🕐 {now_local().strftime('%d.%m.%Y %H:%M:%S')}\n"
-                    f"⏱ Час сесії: *{fmt_duration(duration)}*\n"
-                    f"📊 Онлайн сьогодні: *{fmt_duration(state.online_seconds_today)}*"
+                    f"⏱ Час сесії: <b>{fmt_duration(duration)}</b>\n"
+                    f"📊 Онлайн сьогодні: <b>{fmt_duration(state.online_seconds_today)}</b>"
                 )
 
         except FloodWaitError as e:
@@ -403,6 +424,11 @@ async def main():
         await tg_client.start()
         me = await tg_client.get_me()
         log.info("Telethon connected as: %s", me.first_name)
+
+        # Автоматично призначаємо свій акаунт як власника для сповіщень
+        if not state.owner_chat_id and me and me.id:
+            state.owner_chat_id = me.id
+            log.info("Auto-registered owner chat_id from Telegram account: %d", me.id)
 
         # Запускаємо трекер та бота паралельно
         await asyncio.gather(
