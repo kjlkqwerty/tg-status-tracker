@@ -7,6 +7,14 @@ aiogram (bot) надсилає красиві сповіщення власни�
 Python: 3.8+  |  Telethon + aiogram 3.x
 """
 
+import os as _os
+_os.environ["TZ"] = "Europe/Kyiv"
+try:
+    import time as _time
+    _time.tzset()
+except AttributeError:
+    pass
+
 import asyncio
 import html
 import logging
@@ -63,15 +71,23 @@ LOG_FILE: str | None = None   # На Railway логи йдуть у stdout
 
 # ── Логування ─────────────────────────────────────────────────────────────────
 def setup_logging() -> logging.Logger:
-    def kyiv_time_converter(*args):
-        return datetime.now(KYIV_TZ).timetuple()
+    def kyiv_time_converter(sec=None):
+        if sec is None:
+            return datetime.now(KYIV_TZ).timetuple()
+        return datetime.fromtimestamp(sec, tz=timezone.utc).astimezone(KYIV_TZ).timetuple()
 
-    logging.Formatter.converter = kyiv_time_converter
+    class KyivFormatter(logging.Formatter):
+        converter = staticmethod(kyiv_time_converter)
+
     fmt = "%(asctime)s [%(levelname)s] %(message)s"
-    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
-    if LOG_FILE:
-        handlers.append(logging.FileHandler(LOG_FILE, encoding="utf-8"))
-    logging.basicConfig(level=logging.INFO, format=fmt, datefmt="%Y-%m-%d %H:%M:%S", handlers=handlers)
+    datefmt = "%Y-%m-%d %H:%M:%S"
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(KyivFormatter(fmt=fmt, datefmt=datefmt))
+    
+    root_log = logging.getLogger()
+    root_log.setLevel(logging.INFO)
+    root_log.handlers = [handler]
+    
     logging.getLogger("telethon").setLevel(logging.WARNING)
     logging.getLogger("aiogram").setLevel(logging.WARNING)
     return logging.getLogger("tracker_bot")
